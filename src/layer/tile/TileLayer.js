@@ -17,6 +17,7 @@ L.TileLayer = L.Class.extend({
 		continuousWorld: false,
 		noWrap: false,
 		zoomOffset: 0,
+		zoomReverse: false,
 
 		unloadInvisibleTiles: L.Browser.mobile,
 		updateWhenIdle: L.Browser.mobile
@@ -125,6 +126,10 @@ L.TileLayer = L.Class.extend({
 		}
 		this._tiles = {};
 
+		if (this.options.reuseTiles) {
+			this._unusedTiles = [];
+		}
+
 		if (clearOldContainer && this._container) {
 			this._container.innerHTML = "";
 		}
@@ -145,7 +150,8 @@ L.TileLayer = L.Class.extend({
 
 		this._addTilesFromCenterOut(tileBounds);
 
-		if (this.options.unloadInvisibleTiles) {
+		if (this.options.unloadInvisibleTiles ||
+			this.options.reuseTiles) {
 			this._removeOtherTiles(tileBounds);
 		}
 	},
@@ -199,6 +205,9 @@ L.TileLayer = L.Class.extend({
 					if (tile.parentNode === this._container) {
 						this._container.removeChild(tile);
 					}
+					if (this.options.reuseTiles) {
+						this._unusedTiles.push(this._tiles[key]);
+					}
 					delete this._tiles[key];
 				}
 			}
@@ -209,7 +218,7 @@ L.TileLayer = L.Class.extend({
 		var tilePos = this._getTilePos(tilePoint),
 			zoom = this._map.getZoom(),
 			key = tilePoint.x + ':' + tilePoint.y,
-			tileLimit = Math.pow(2, (zoom + this.options.zoomOffset));
+			tileLimit = Math.pow(2, this._getOffsetZoom(zoom));
 
 		// wrap tile coordinates
 		if (!this.options.continuousWorld) {
@@ -226,8 +235,8 @@ L.TileLayer = L.Class.extend({
 			}
 		}
 
-		// create tile
-		var tile = this._createTile();
+		// get unused tile - or create a new tile
+		var tile = this._getTile();
 		L.DomUtil.setPosition(tile, tilePos);
 
 		this._tiles[key] = tile;
@@ -239,6 +248,11 @@ L.TileLayer = L.Class.extend({
 		this._loadTile(tile, tilePoint, zoom);
 
 		container.appendChild(tile);
+	},
+
+	_getOffsetZoom: function (zoom) {
+		zoom = this.options.zoomReverse ? this.options.maxZoom - zoom : zoom;
+		return zoom + this.options.zoomOffset;
 	},
 
 	_getTilePos: function (tilePoint) {
@@ -256,7 +270,7 @@ L.TileLayer = L.Class.extend({
 
 		return L.Util.template(this._url, L.Util.extend({
 			s: s,
-			z: zoom + this.options.zoomOffset,
+			z: this._getOffsetZoom(zoom),
 			x: tilePoint.x,
 			y: tilePoint.y
 		}, this._urlParams));
@@ -269,6 +283,19 @@ L.TileLayer = L.Class.extend({
 		var tileSize = this.options.tileSize;
 		this._tileImg.style.width = tileSize + 'px';
 		this._tileImg.style.height = tileSize + 'px';
+	},
+
+	_getTile: function () {
+		if (this.options.reuseTiles && this._unusedTiles.length > 0) {
+			var tile = this._unusedTiles.pop();
+			this._resetTile(tile);
+			return tile;
+		}
+		return this._createTile();
+	},
+
+	_resetTile: function (tile) {
+		// Override if data stored on a tile needs to be cleaned up before reuse
 	},
 
 	_createTile: function () {
